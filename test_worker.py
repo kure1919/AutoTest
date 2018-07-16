@@ -6,12 +6,7 @@ import socket
 import pickle
 import threading
 import os
-
-TRANS_FILES = b'1'
-END_TRANS = b'2'
-SUCCESS_RECV = b'3'
-FAIL_RECT = b'4'
-END_FILE = b'5'
+import const
 
 PORT_NUMBER = 16000
 MASTER_IP = '127.0.0.1'
@@ -20,19 +15,12 @@ ENCODE = 'utf-8'
 DEFAULT_RETRY_COUNT = 3
 DUMMY_PID = b'1234'
 
+class TestSocketMaster:
+    def __del__(self):
+        self.clientSock.close()
+        self.serverSock.close()
+        self.serverTestSock.close()
 
-class TestDataSender:
-    def _TestCase1(self, sock):
-        sock.send(DUMMY_PID);
-
-    def TestCase1(self, sock):
-        clientThread = \
-            threading.Thread( \
-                target=self._TestCase1, args=(sock,))
-        clientThread.start()
-
-
-class TestExecResist(TestCase):
     def SetupClient(self):
         self.clientSock.connect((MASTER_IP, PORT_NUMBER))
 
@@ -58,35 +46,44 @@ class TestExecResist(TestCase):
             threading.Thread( \
                 target=self.SetupClient)
         clientThread.start()
+        while not self.connectState:
+            sleep(3)
 
-    def RecvTestDataMock1(self, newDir, retryCount):
+class TestExecResist(TestCase):
+    def RecvTestDataMock1(self, sock, addr, newDir, retryCount):
         self.recvTestDataCallCount += 1
         return (True, True)
 
-    def RecvTestDataMock2(self, newDir, retryCount):
+    def RecvTestDataMock2(self, sock, addr, newDir, retryCount):
         self.recvTestDataCallCount += 1
         if (self.recvTestDataCallCount < 3):
             return (True, False)
         else:
             return (True, True)
 
-    def RecvTestDataMock3(self, newDir, retryCount):
+    def RecvTestDataMock3(self, sock, addr, newDir, retryCount):
         raise Exception('Test Exception')
         return (True, True)
 
-    def RecvTestDataMock4(self, newDir, retryCount):
+    def RecvTestDataMock4(self, sock, addr, newDir, retryCount):
         raise ValueError('Test Value Error Exception')
         return (True, True)
 
-    def RecvTestDataMock5(self, newDir, retryCount):
+    def RecvTestDataMock5(self, sock, addr, newDir, retryCount):
         raise OSError('Test Value Error Exception')
         return (True, True)
 
+    def ExecTaskMock(self):
+        self.execTaskCalled += 1
+
+    def ExecTaskMock2(self):
+        self.execTaskCalled += 1
+        sleep(10)
+
     def test_ExecResist(self):
-        worker = Worker()
-        self.SetupSocket()
-        while not self.connectState:
-            sleep(3)
+        worker = Worker('dummy')
+        sockMaster = TestSocketMaster()
+        sockMaster.SetupSocket()
 
         # テスト用フォルダがあれば削除
         testMkDir = '%s_%s' % (MASTER_IP, DUMMY_PID.decode(ENCODE))
@@ -94,81 +91,180 @@ class TestExecResist(TestCase):
             os.rmdir(testMkDir)
 
         self.recvTestDataCallCount = 0
+        self.execTaskCalled = 0
         worker.RecvTestData = self.RecvTestDataMock1
-        worker.socket = self.serverTestSock
+        worker.ExecTask = self.ExecTaskMock
 
-        sender = TestDataSender()
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd)
+        sock=sockMaster.clientSock
+
+        # 初回呼び出し
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        thread.join()
         self.assertEqual(1, self.recvTestDataCallCount)
         self.assertTrue(os.path.isdir(testMkDir))
+        self.assertEqual(MASTER_IP, worker.masterList[0][1][0])
+        self.assertEqual(1, len(worker.masterList))
+        self.assertEqual(1, self.execTaskCalled)
+        self.assertTrue(worker.execWork)
+        worker.execWork = False
 
         # フォルダが存在する場合はエラー出力してファイル受信しない
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd);
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        state=sock.recv(1024)
+        self.assertEqual(const.INIT_ERROR, state)
+        thread.join()
         self.assertEqual(1, self.recvTestDataCallCount)
         # フォルダを消してないか確認
         self.assertTrue(os.path.isdir(testMkDir))
         os.rmdir(testMkDir)
+        # タスクを実行しないか確認
+        self.assertEqual(1, self.execTaskCalled)
 
-        # 継続して呼び出すか確認
+        # RecvTestData() を連続して呼び出すか確認
         worker.RecvTestData = self.RecvTestDataMock2
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd)
-        self.assertEqual(3, self.recvTestDataCallCount)
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        thread.join()
         # フォルダ確認
         self.assertTrue(os.path.isdir(testMkDir))
         os.rmdir(testMkDir)
+        # スレッドの実行確認
+        self.assertEqual(2, self.execTaskCalled)
+        worker.execWork = False
 
         # エラー発生時にフォルダを消すか確認
         # 継続して呼び出すか確認
         worker.RecvTestData = self.RecvTestDataMock3
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd)
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        state=sock.recv(1024)
+        self.assertEqual(const.INIT_ERROR, state)
+        thread.join()
         # フォルダ確認
         self.assertFalse(os.path.isdir(testMkDir))
 
         worker.RecvTestData = self.RecvTestDataMock4
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd)
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        state=sock.recv(1024)
+        self.assertEqual(const.INIT_ERROR, state)
+        thread.join()
         # フォルダ確認
         self.assertFalse(os.path.isdir(testMkDir))
 
         worker.RecvTestData = self.RecvTestDataMock5
-        sender.TestCase1(self.clientSock)
-        worker.ExecResist(self.clientAdd)
+        thread = \
+            threading.Thread( \
+                target=worker.ExecResist, \
+                args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
+        thread.start()
+        sock.send(DUMMY_PID)
+        state=sock.recv(1024)
+        self.assertEqual( const.SUCCESS_RECV, state )
+        state=sock.recv(1024)
+        self.assertEqual(const.INIT_ERROR, state)
+        thread.join()
         # フォルダ確認
         self.assertFalse(os.path.isdir(testMkDir))
 
-        # 後始末
-        self.serverTestSock.close()
-        self.serverSock.close()
-        self.clientSock.close()
-
-class DummySocket(TestCase):
-    def __init__(self):
-        self.recvCallCount=0
-        self.sendCallCount=0
-
-    def recv(self, buffSize):
-        if self.recvCallCount == 0:
-            return pickle.dumps( (TRANS_FILES, 'dymmy_path', True ) )
-
-        self.recvCallCount += 1
-
-    def send(self, value):
-        if self.sendCallCount == 0:
-            if SUCCESS_RECV != value:
-                raise Exception('Fail info protocol failed.')
-
 class TestWorker(TestCase):
-    def test_RecvTestData(self):
-        worker = Worker()
-        worker.socket = DummySocket()
-        try:
-            result, endFlag = worker.RecvTestData( './', 0 );
-            self.assertTrue( result )
-            self.assertFalse( endFlag )
-        except Exception:
-            import traceback
-            traceback.print_exc()
+    def TaskSend(self, opt ):
+        print( 'Send New Task' )
+        self.clientSock.send( pickle.dumps((const.NEW_TASK, opt)) )
+        # データサイズ, 結果の順で飛んでくる
+        risSize=pickle.loads(self.clientSock.recv(1024))
+        self.assertEqual(const.TRANS_SIZE,risSize[0])
+        risSize=risSize[1]
+        result=b''
+        tmp=0
+        print('Recv size:' + str(risSize) )
+        while tmp < risSize:
+            print('Recv st' )
+            result += self.clientSock.recv(1024)
+            print('Recv ed' )
+            tmp += len(result)
+        result = pickle.loads(result)
+        self.assertEqual( const.TASK_RESULT, result[0])
+        self.assertEqual( 0, result[1] )
+        self.assertEqual( opt, result[2].decode(ENCODE).strip() )
+        print('End TaskSend')
+
+    def TaskSender(self):
+        print('Send start info')
+        self.clientSock.send(const.TASK_START)
+        # タスク送信
+        print( 'Task1' )
+        self.TaskSend( 'Task1' )
+        print( 'Task2' )
+        self.TaskSend( 'Task2' )
+        print( 'End' )
+        # タスク終了
+        self.clientSock.send( pickle.dumps((const.END_TASK, '')) )
+
+    def EndTask(self, sock, realPath, virtPath):
+        return 0
+
+    def test___ExecTask(self):
+        worker = Worker('dummy.bat')
+        worker.EndTask = self.EndTask
+        sockMaster = TestSocketMaster()
+        sockMaster.SetupSocket()
+
+        self.clientSock=sockMaster.clientSock
+
+        clientThread = \
+            threading.Thread( \
+                target=self.TaskSender)
+        clientThread.start()
+        # ステータス受信
+        worker._ExecTask(sockMaster.serverTestSock,(MASTER_IP, PORT_NUMBER), 'dummy')
+        clientThread.join()
+
+    def test_ExecTask(self):
+        worker = Worker('dummy.bat')
+        worker.EndTask = self.EndTask
+        sockMaster = TestSocketMaster()
+        sockMaster.SetupSocket()
+
+        self.clientSock=sockMaster.clientSock
+        worker.masterList.append( (sockMaster.serverTestSock, (MASTER_IP, PORT_NUMBER), 'dummy') )
+
+        clientThread = \
+            threading.Thread( \
+                target=self.TaskSender)
+        clientThread.start()
+        # ステータス受信
+        worker.ExecTask()
+        clientThread.join()
