@@ -14,11 +14,11 @@ logger.setLevel(CRITICAL)
 logger.addHandler(handler)
 logger.propagate = False
 
-HOST = "192.168.10.50"
+HOST = "192.168.10.104"
 PORT = 16000
 ENCODE = 'utf-8'
 
-Workers = [ [HOST, PORT], [HOST, 16001],[HOST, 16002],[HOST, 16003],]
+Workers = [ [HOST, PORT],]
 SetUpFiles = [ 'ope_test', ]
 
 class Master:
@@ -141,11 +141,11 @@ class Master:
                             result += data
                         logger.debug('Recv result end')
                         result = pickle.loads(result)
-                        if result[0] == 0:
+                        if result[1] == 0:
                             print( 'Job %s is OK' % (result[2]))
                         else:
                             print( 'Job %s is NG' % (result[2]))
-                            print( result[3] )
+                            print( result[3].decode('sjis', errors="ignore") )
                             ret = False
 
                         logger.debug('Get new task to %s' % (addr[0]) )

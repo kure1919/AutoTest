@@ -201,6 +201,6 @@ class Worker:
             print('Error : {0}'.format(e.strerror))
 
 if __name__ == "__main__":
-    worker=Worker('./dummy.sh')
+    worker=Worker('.\\dummy.bat')
     masterResist = threading.Thread(target=worker.MasterResist)
     masterResist.start()
