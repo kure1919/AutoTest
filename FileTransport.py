@@ -5,7 +5,7 @@ import os
 import const
 
 from logging import getLogger
-logger = getLogger(__name__)
+logger = getLogger('auto_test_frame')
 
 class FileTransporter:
     def SendDataUnit(self, socket, addr, path, virtPath, retryCount):
@@ -43,20 +43,24 @@ class FileTransporter:
             result = True
         except OSError as e:
             print( e.strerror )
+            import traceback
+            traceback.print_exc()
         except ValueError as e:
             print( e )
+            import traceback
+            traceback.print_exc()
 
         # リトライ
         if not result:
             if( 0 < retryCount ):
                 print( 'Error detect retry')
-                result = TransforTestData( socket, path, virtPath, retryCount - 1 )
+                result = SendDataUnit( socket, path, virtPath, retryCount - 1 )
             else:
                 raise ValueError( 'Error SetUp' )
 
         return  result
 
-    def RecurseSendData(self, socket, addr, realBase, virtBase):
+    def _RecurseSendData(self, socket, addr, realBase, virtBase):
         for path in os.listdir(realBase):
             realPath = path
             if 0 < len( realBase ):
@@ -67,7 +71,11 @@ class FileTransporter:
             self.SendDataUnit(socket, addr, realPath, virtPath, const.DEFAULT_RETRY_COUNT)
             # ディレクトリの場合再起的に転送
             if os.path.isdir( realPath ):
-                self.RecurseSendData(socket, addr, realPath, virtPath)
+                self._RecurseSendData(socket, addr, realPath, virtPath)
+
+    def RecurseSendData(self, socket, addr, realBase, virtBase):
+        self.SendDataUnit(socket, addr, realBase, virtBase, const.DEFAULT_RETRY_COUNT)
+        self._RecurseSendData(socket, addr, realBase, virtBase)
 
     def SendEndInfo(self, socket, addr):
         logger.debug('Send end info to %s' % (addr[0]))
@@ -85,6 +93,7 @@ class FileTransporter:
             baseDir='.'
 
         if not os.path.exists(baseDir):
+            logger.debug('Create base dir %s' % (baseDir))
             os.makedirs(baseDir)
 
         result = False
@@ -106,9 +115,10 @@ class FileTransporter:
                 sock.send(const.SUCCESS_RECV)
                 fullPath = '{}/{}'.format(baseDir, path)
                 if isDir:
-                    logger.debug('Make dir(%s)' % (fullPath))
-                    # ディレクトリの場合はディレクトリを作成
-                    os.makedirs(fullPath)
+                    if not os.path.exists(fullPath):
+                        logger.debug('Make dir(%s)' % (fullPath))
+                        # ディレクトリの場合はディレクトリを作成
+                        os.makedirs(fullPath)
                 else:
                     fileSize=int(sock.recv(1024).decode(const.ENCODE))
                     logger.debug('Recv File size(from %s): %s' % (addr[0], str( fileSize )))

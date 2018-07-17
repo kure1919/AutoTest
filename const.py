@@ -20,6 +20,9 @@ class _const:
         self.INIT_SUCCESS=b'14'
         self.GET_STATE=b'15'
         self.SUCCESS_CLOSE=b'14'
+        self.RESIST_WORKER=b'15'
+        self.RESIST_MASTER=b'15'
+        self.REQUEST_WORKER=b'15'
 
     class ConstError(TypeError):
         pass

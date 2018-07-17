@@ -5,12 +5,13 @@ import os
 import const
 import threading
 from FileTransport import FileTransporter
+from datetime import datetime
 
 from logging import getLogger, StreamHandler, DEBUG, CRITICAL
-logger = getLogger(__name__)
+logger = getLogger('auto_test_frame')
 handler = StreamHandler()
-handler.setLevel(CRITICAL)
-logger.setLevel(CRITICAL)
+handler.setLevel(DEBUG)
+logger.setLevel(DEBUG)
 logger.addHandler(handler)
 logger.propagate = False
 
@@ -18,14 +19,17 @@ HOST = "192.168.10.104"
 PORT = 16000
 ENCODE = 'utf-8'
 
-Workers = [ [HOST, PORT],]
-SetUpFiles = [ 'ope_test', ]
+Workers = [ ['192.168.50.71', PORT], ['192.168.50.72', PORT], ['192.168.50.73', PORT]]
+SetUpFiles = [ 'bin', 'env', 'ope_test', ]
 
 class Master:
     def __init__(self, baseDir):
         self.fileTrans=FileTransporter()
         self.workerList=[]
         self.baseDir=baseDir
+        print()
+        os.system('rd /s /q %s\\ope_test\\result' % (baseDir))
+        os.system('mkdir %s\\ope_test\\result' % (baseDir))
         self.lock = threading.Lock()
 
     def _MasterRegist( self, workers, retryCount ):
@@ -74,12 +78,8 @@ class Master:
         taskList=[]
         with open(taskFile, "r") as f:
             for line in f:
-                line = line.strip()
-                if '#' == line:
-                    continue
-                if 0 == len( line ):
-                    continue
-                taskList.append(line)
+                if( 0 < len(line) ) and ( line[0] != '#' ):
+                    taskList.append(line.strip())
         return taskList
 
     def __GetNewTask(self):
@@ -141,12 +141,13 @@ class Master:
                             result += data
                         logger.debug('Recv result end')
                         result = pickle.loads(result)
-                        if result[1] == 0:
-                            print( 'Job %s is OK' % (result[2]))
-                        else:
-                            print( 'Job %s is NG' % (result[2]))
-                            print( result[3].decode('sjis', errors="ignore") )
-                            ret = False
+                        with self.lock:
+                            if result[1] == 0:
+                                print( 'Job %s is OK' % (result[2]))
+                            else:
+                                print( 'Job %s is NG' % (result[2]))
+                                print( result[3].decode('sjis', errors="ignore") )
+                                ret = False
 
                         logger.debug('Get new task to %s' % (addr[0]) )
                         task=self.__GetNewTask()
@@ -191,11 +192,26 @@ class Master:
         return self.taskResult
 
     def ExecTask(self):
+        print('File copy start\t: ' + datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
         if self._MasterRegist(Workers,const.DEFAULT_RETRY_COUNT):
-            return self._SendTask('%s/ope_test/case/task_list.txt' % (self.baseDir) )
+            print('File copy end\t: ' + datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
+            return self._SendTask('%s/ope_test/case/test_case.txt' % (self.baseDir) )
         else:
             return False;
 
 if __name__ == "__main__":
-    master = Master('.');
-    exit( master.ExecTask() )
+    handler.setLevel(CRITICAL)
+    logger.setLevel(CRITICAL)
+    master = Master('D:\\MASTER\\AP\\etc\\zwh');
+    print('**** operation test start ****')
+    print('start\t: ' + datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
+    print('--------------------------------------------------------')
+    ret = master.ExecTask()
+    print( "--------------------------------------------------------" )
+    print( "end\t: " + datetime.now().strftime("%Y/%m/%d %H:%M:%S") )
+    if ret:
+        print( "operation test succeeded" )
+        exit( 0 )
+    else:
+        print( "operation test failed" )
+        exit( 1 )

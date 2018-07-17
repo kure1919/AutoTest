@@ -100,7 +100,7 @@ class TestExecResist(TestCase):
         # 初回呼び出し
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -118,7 +118,7 @@ class TestExecResist(TestCase):
         # フォルダが存在する場合はエラー出力してファイル受信しない
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -138,7 +138,7 @@ class TestExecResist(TestCase):
         worker.RecvTestData = self.RecvTestDataMock2
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -157,7 +157,7 @@ class TestExecResist(TestCase):
         worker.RecvTestData = self.RecvTestDataMock3
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -172,7 +172,7 @@ class TestExecResist(TestCase):
         worker.RecvTestData = self.RecvTestDataMock4
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -187,7 +187,7 @@ class TestExecResist(TestCase):
         worker.RecvTestData = self.RecvTestDataMock5
         thread = \
             threading.Thread( \
-                target=worker.ExecResist, \
+                target=worker.ExecMasterResist, \
                 args=(sockMaster.serverTestSock, sockMaster.clientAdd,))
         thread.start()
         sock.send(DUMMY_PID)
@@ -206,6 +206,8 @@ class TestWorker(TestCase):
         # データサイズ, 結果の順で飛んでくる
         risSize=pickle.loads(self.clientSock.recv(1024))
         self.assertEqual(const.TRANS_SIZE,risSize[0])
+        # 受信結果の送信
+        self.clientSock.send(const.SUCCESS_RECV)
         risSize=risSize[1]
         result=b''
         tmp=0
@@ -218,12 +220,15 @@ class TestWorker(TestCase):
         result = pickle.loads(result)
         self.assertEqual( const.TASK_RESULT, result[0])
         self.assertEqual( 0, result[1] )
-        self.assertEqual( opt, result[2].decode(ENCODE).strip() )
+        self.assertEqual( opt, result[2].strip() )
         print('End TaskSend')
 
     def TaskSender(self):
         print('Send start info')
         self.clientSock.send(const.TASK_START)
+        # status チェック
+        data=self.clientSock.recv(1024)
+        self.assertEqual( const.TASK_READY, data)
         # タスク送信
         print( 'Task1' )
         self.TaskSend( 'Task1' )

@@ -9,16 +9,16 @@ import subprocess
 from FileTransport import FileTransporter
 import const
 
-from logging import getLogger, StreamHandler, DEBUG
-logger = getLogger(__name__)
+from logging import getLogger, StreamHandler, DEBUG, CRITICAL
+logger = getLogger('auto_test_frame')
 handler = StreamHandler()
 handler.setLevel(DEBUG)
 logger.setLevel(DEBUG)
 logger.addHandler(handler)
 logger.propagate = False
 
+WORKER_MASTER_IP = '192.168.50.71'
 PORT_NUMBER = 16000
-MASTER_IP = '192.168.10.50'
 TEMP_DIR = '.'
 ENCODE = 'utf-8'
 
@@ -26,9 +26,13 @@ class Worker:
     def __init__(self, workCmd):
         self.workCmd=workCmd
         self.masterList=[]
+        self.workerList=[]
         self.execWork=False
         self.lock = threading.Lock()
         self.trans = FileTransporter()
+
+        self.myHost = socket.gethostbyname(socket.gethostname())
+        self.myPort = PORT_NUMBER
 
     def RecvTestData(self, sock, addr, baseDir, retryCount):
         return self.trans.RecvData(sock, addr, baseDir, retryCount)
@@ -82,7 +86,8 @@ class Worker:
                 mode = data[0]
                 task = data[1]
                 if const.NEW_TASK == mode:
-                    cmdStr='%s %s' % (self.workCmd, task)
+                    fullRootPath=os.path.abspath(tempDir)
+                    cmdStr='%s %s %s' % (self.workCmd, fullRootPath, task)
                     logger.debug('Exec cmd: %s' % (cmdStr))
                     ret, output = self.ExecCmd(cmdStr )
                     result  = pickle.dumps( [const.TASK_RESULT, ret, task, output] )
@@ -106,6 +111,8 @@ class Worker:
 
         except ValueError as e:
             print('Error : {0}'.format(e))
+            import traceback
+            traceback.print_exc()
         except Exception:
             import traceback
             traceback.print_exc()
@@ -136,7 +143,7 @@ class Worker:
             self.execWork = False
 
     # マスター登録処理
-    def ExecResist(self, sock, addr):
+    def ExecMasterResist(self, sock, addr):
         # プロセス ID 取得
         newDir = ''
         try:
@@ -184,23 +191,68 @@ class Worker:
             if (0 < len(newDir)):
                 shutil.rmtree(newDir);
 
-    def MasterResist(self):
+    # ワーカー登録処理
+    def ExecWorkerResist(self, sock, addr):
+        # プロセス ID 取得
+        newDir = ''
         try:
+            logger.debug('Recv ip from %s' % (addr[0]) )
+            pid = sock.recv(1024).decode(ENCODE)
+            sock.send(const.SUCCESS_RECV)
+            newDir = '{}/{}_{}'.format(TEMP_DIR, addr[0], pid)
+            logger.debug('Make dir %s' % (newDir) )
+            os.makedirs(newDir);
+        except OSError as e:
+            print('Error : {0}'.format(e.strerror))
+            sock.send(const.INIT_ERROR)
+            if (0 < len(newDir)):
+                shutil.rmtree(newDir)
+        except ValueError as e:
+            print('Error : {0}'.format(e))
+            sock.send(const.INIT_ERROR)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            sock.send(const.INIT_ERROR)
+
+    # ワーカーの登録
+    def EntryWorkerMaster(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.connect(WORKER_MASTER_IP, PORT_NUMBER)
+
+        # レジスト info を送信
+        logger.debug('Send resist info')
+        date = pickle.dumps( [const.RESIST_WORKER, self.myHost, self.myPort] )
+        sock.send( data )
+        logger.debug('Recv resist info send state')
+        state=sock.recv(1024)
+        if const.SUCCESS_RECV != state:
+            ValueError('Error resist my ip.')
+
+    def WorkerGate(self):
+        try:
+            self.workerList = [ [host, port], ]
             resistSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             resistSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            resistSock.bind((MASTER_IP, PORT_NUMBER))
+            resistSock.bind((self.myHost, self.myPort))
             while True:
                 resistSock.listen(20)
                 newSocket, newMasAdd = resistSock.accept()
                 resistThread = \
                     threading.Thread( \
-                        target=self.ExecResist, args=(newSocket, newMasAdd,))
+                        target=self.ExecMasterResist, args=(newSocket, newMasAdd,))
                 resistThread.start()
 
         except OSError as e:
             print('Error : {0}'.format(e.strerror))
+            import traceback
+            traceback.print_exc()
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
-    worker=Worker('.\\dummy.bat')
-    masterResist = threading.Thread(target=worker.MasterResist)
+    worker=Worker('python .\\run_single_unit_test.py')
+    masterResist = threading.Thread(target=worker.WorkerGate)
     masterResist.start()
